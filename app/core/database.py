@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS parsed_posts (
 
 CREATE INDEX IF NOT EXISTS idx_parsed_posts_channel ON parsed_posts (channel);
 CREATE INDEX IF NOT EXISTS idx_parsed_posts_parsed_at ON parsed_posts (parsed_at);
+
+CREATE TABLE IF NOT EXISTS parser_channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    added_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 

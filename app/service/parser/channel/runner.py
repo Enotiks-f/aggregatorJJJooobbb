@@ -18,14 +18,15 @@ from telethon.errors import (
 )
 from telethon.tl.types import Message
 
+from app.storage.channels_repository import ChannelsRepository
 from app.storage.posts_repository import PostsRepository
 
 from .classifier import VacancyResult, build_post_url, classify
 from .config import (
     API_HASH,
     API_ID,
-    CHANNELS,
     DATABASE_PATH,
+    DEFAULT_CHANNELS,
     GOOGLE_SPREADSHEET_ID,
     MAX_POST_AGE_DAYS,
     MESSAGES_LIMIT,
@@ -108,6 +109,23 @@ async def search_channel(
 OnParsingDone = Callable[[], Awaitable[None]]
 
 
+def load_channels_for_parse(channels: List[str] | None = None) -> tuple[List[str], str | None]:
+    if channels is not None:
+        return channels, None
+
+    repo = ChannelsRepository(DATABASE_PATH)
+    repo.connect()
+    try:
+        repo.seed_defaults(DEFAULT_CHANNELS)
+        loaded = repo.list_all()
+    finally:
+        repo.close()
+
+    if not loaded:
+        return [], "Список каналов пуст. Добавьте каналы: /add_chennel"
+    return loaded, None
+
+
 async def run_search(
     *,
     channels: List[str] | None = None,
@@ -117,8 +135,19 @@ async def run_search(
     min_score: int = DEFAULT_MIN_SCORE,
     on_parsing_done: OnParsingDone | None = None,
 ) -> ParseSummary:
-    channels = channels or CHANNELS
+    channels, channels_error = load_channels_for_parse(channels)
     sheet_url = spreadsheet_url()
+
+    if channels_error:
+        return ParseSummary(
+            channels_count=0,
+            total_found=0,
+            filtered_count=0,
+            skipped_in_db=0,
+            exported_count=0,
+            sheet_url=sheet_url,
+            error=channels_error,
+        )
 
     if not API_ID or not API_HASH:
         return ParseSummary(

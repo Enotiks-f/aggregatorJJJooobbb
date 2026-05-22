@@ -12,12 +12,35 @@ HELP_TEXT = """\
 /start — приветствие и о боте
 /help — этот список команд
 /jjjooobbb — запустить парсинг каналов и обновить таблицу
+/chennels — список каналов для парсинга
+/add_chennel — добавить один или несколько каналов
+/remove_chennel — удалить один или несколько каналов"""
 
-Скоро:
-/addchennels — добавить канал для парсинга
-/removechennels — удалить канал из списка
-/listchennels — список каналов
-/parse — то же, что /jjjooobbb"""
+CHANNELS_LIST_HEADER = "📡 Каналы для парсинга:"
+
+CHANNELS_EMPTY = (
+    "Список каналов пуст.\n\n"
+    "Добавьте каналы командой /add_chennel"
+)
+
+CHANNELS_ADD_USAGE = """\
+Добавление каналов — /add_chennel
+
+Укажите каналы в одном сообщении (без @):
+• через пробел: workenot futru_it easycareerstart
+• через запятую: workenot, futru_it
+• с новой строки:
+workenot
+futru_it
+
+Также можно: @channel или ссылка t.me/channel"""
+
+CHANNELS_REMOVE_USAGE = """\
+Удаление каналов — /remove_chennel
+
+Формат такой же, как у /add_chennel:
+/remove_chennel workenot futru_it
+или несколько каналов с новой строки."""
 
 PARSE_STARTED_TEXT = (
     "⏳ Начался парсинг каналов…\n"
