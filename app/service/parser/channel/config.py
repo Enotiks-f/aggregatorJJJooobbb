@@ -49,18 +49,36 @@ GOOGLE_SERVICE_ACCOUNT_FILE = Path(_creds_file)
 if not GOOGLE_SERVICE_ACCOUNT_FILE.is_absolute():
     GOOGLE_SERVICE_ACCOUNT_FILE = _PROJECT_ROOT / GOOGLE_SERVICE_ACCOUNT_FILE
 
-# ─── Каналы для поиска ──────────────────────────────────────────────────────
-# Добавляй username каналов без @
-CHANNELS = [
-    "easycareerstart",
-    "workenot",
-    "futru_it",
-    "jobskolkovo",
-    "remote_jobs_relocate",
+# ─── Каналы по умолчанию (при первом запуске копируются в БД) ───────────────
+DEFAULT_CHANNELS = [
+    "hubdgtl",
     "cozy_hr",
     "edujobs",
-    "interns_stazhirovki_remote"
+    "workenot",
+    "workvc",
+    "extyl_outstaff",
+    "interns_stazhirovki_remote",
+    "jobskolkovo",
+    "futru_it",
+    "remote_jobs_relocate",
+    "juniors_managers_jobs",
+    "easycareerstart",
+    "relocationdev",
+    "abroadz",
+    "CareerPump",
+    "edoocate",
+    "sea_relocation",
+    "nst_itsme",
+    "joinyouthuz",
+    "newdirections",
+    "edu_traveler",
+    "studyqa",
+    "check_opportunities",
+    "confsci",
+    "worldabroad",
 ]
+
+CHANNELS = DEFAULT_CHANNELS  # обратная совместимость для CLI
 
 # ─── Параметры поиска ────────────────────────────────────────────────────────
 # Глубина поиска — сколько последних постов брать из каждого канала
