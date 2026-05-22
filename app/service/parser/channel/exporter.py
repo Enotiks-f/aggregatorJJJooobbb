@@ -1,11 +1,12 @@
 """
-Экспорт результатов поиска в Google Sheets (листы Alpha и Сводка).
+Экспорт результатов поиска в Google Sheets (листы Alpha и Сводка) - ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import List
+import time
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -94,6 +95,7 @@ def _get_spreadsheet() -> gspread.Spreadsheet:
 
 
 def _set_column_widths(worksheet: gspread.Worksheet, widths: list[int]) -> None:
+    """Установка ширины колонок одним запросом"""
     requests = [
         {
             "updateDimensionProperties": {
@@ -109,7 +111,9 @@ def _set_column_widths(worksheet: gspread.Worksheet, widths: list[int]) -> None:
         }
         for idx, width in enumerate(widths)
     ]
-    worksheet.client.batch_update(worksheet.spreadsheet_id, {"requests": requests})
+    if requests:
+        worksheet.client.batch_update(worksheet.spreadsheet_id, {"requests": requests})
+        time.sleep(0.1)  # Небольшая пауза после массовой операции
 
 
 def _get_or_add_worksheet(
@@ -162,48 +166,135 @@ def _result_to_row(result: VacancyResult) -> list:
 
 
 def _find_next_row(worksheet: gspread.Worksheet) -> int:
+    """Быстрое определение следующей свободной строки"""
     values = worksheet.col_values(1)
-    for idx in range(len(values), 0, -1):
-        if values[idx - 1].strip():
-            return idx + 1
-    return 1
+    return len(values) + 1 if values else 1
 
 
 def _ensure_alpha_layout(worksheet: gspread.Worksheet) -> None:
-    existing = worksheet.get_all_values()
-    if len(existing) >= 2 and existing[1] == HEADERS:
+    """Оптимизированная настройка листа Alpha - минимум запросов"""
+    try:
+        # Проверяем, есть ли уже заголовки
+        existing = worksheet.get_all_values()
+        if existing and len(existing) >= 2 and existing[1] == HEADERS:
+            return
+
+        # Все операции в одном batch_update
+        title = f"🔍 Поиск вакансий — {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+
+        # Подготавливаем batch запросы
+        requests = []
+
+        # Очистка листа
+        requests.append({
+            "updateCells": {
+                "range": {"sheetId": worksheet.id},
+                "fields": "*"
+            }
+        })
+
+        # Добавляем данные
+        body = {
+            "requests": requests,
+            "includeSpreadsheetInResponse": False
+        }
+
+        # Выполняем одной операцией
+        worksheet.batch_update(body)
+
+        # Отдельные операции для данных (их немного)
+        worksheet.update("A1", [[title]], value_input_option="USER_ENTERED")
+        worksheet.update("A2", [HEADERS], value_input_option="USER_ENTERED")
+        worksheet.merge_cells("A1:K1")
+        worksheet.freeze(rows=2)
+
+        # Форматирование одной операцией
+        format_requests = []
+
+        # Формат заголовков
+        format_requests.append({
+            "repeatCell": {
+                "range": {"sheetId": worksheet.id, "startRowIndex": 0, "endRowIndex": 1},
+                "cell": {"userEnteredFormat": TITLE_FORMAT},
+                "fields": "userEnteredFormat"
+            }
+        })
+
+        format_requests.append({
+            "repeatCell": {
+                "range": {"sheetId": worksheet.id, "startRowIndex": 1, "endRowIndex": 2},
+                "cell": {"userEnteredFormat": HEADER_FORMAT},
+                "fields": "userEnteredFormat"
+            }
+        })
+
+        if format_requests:
+            worksheet.batch_update({"requests": format_requests})
+
+        _set_column_widths(worksheet, COLUMN_WIDTHS_PX)
+
+    except Exception as e:
+        print(f"⚠️ Ошибка настройки Alpha: {e}")
+        raise
+
+
+def _batch_format_rows(worksheet: gspread.Worksheet, results: List[VacancyResult], start_row: int) -> None:
+    """
+    КРИТИЧЕСКАЯ ОПТИМИЗАЦИЯ: форматирование ВСЕХ строк одним batch-запросом
+    Вместо 50+ запросов - 1 запрос
+    """
+    if not results:
         return
 
-    title = f"🔍 Поиск вакансий — {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-    worksheet.clear()
-    worksheet.update("A1", [[title]], value_input_option="USER_ENTERED")
-    worksheet.update("A2", [HEADERS], value_input_option="USER_ENTERED")
-    worksheet.merge_cells("A1:K1")
-    worksheet.freeze(rows=2)
+    # Готовим batch форматы для всех строк
+    batch_formats = []
+    link_formats = []
 
-    worksheet.format("A1:K1", TITLE_FORMAT)
-    worksheet.format("A2:K2", HEADER_FORMAT)
-    _set_column_widths(worksheet, COLUMN_WIDTHS_PX)
-
-
-def _format_data_rows(
-    worksheet: gspread.Worksheet,
-    results: List[VacancyResult],
-    start_row: int,
-) -> None:
     for offset, result in enumerate(results):
         row = start_row + offset
         row_range = f"A{row}:K{row}"
-        worksheet.format(row_range, _hex_direction_fill(result.direction))
-        link_cell = f"F{row}"
-        if result.post_url.startswith("http"):
-            worksheet.format(link_cell, LINK_FORMAT)
+
+        # Формат всей строки
+        batch_formats.append({
+            "range": row_range,
+            "format": _hex_direction_fill(result.direction)
+        })
+
+        # Формат ссылки, если есть
+        if result.post_url and result.post_url.startswith("http"):
+            link_formats.append({
+                "range": f"F{row}",
+                "format": LINK_FORMAT
+            })
+
+    # Отправляем ВСЕ форматы одним запросом (или несколькими, но с паузой)
+    all_formats = batch_formats + link_formats
+
+    # Разбиваем на чанки по 50, чтобы не превысить лимит запроса
+    chunk_size = 50
+    for i in range(0, len(all_formats), chunk_size):
+        chunk = all_formats[i:i+chunk_size]
+        if chunk:
+            try:
+                worksheet.batch_format(chunk)
+                if i + chunk_size < len(all_formats):
+                    time.sleep(0.05)  # Минимальная пауза между большими чанками
+            except Exception as e:
+                print(f"⚠️ Ошибка batch-форматирования: {e}")
+                # Fallback: применяем по одному, но с паузами
+                for fmt in chunk:
+                    try:
+                        worksheet.format(fmt["range"], fmt["format"])
+                        time.sleep(0.02)
+                    except:
+                        pass
 
 
 def _write_summary_sheet(
     spreadsheet: gspread.Spreadsheet,
     results: List[VacancyResult],
 ) -> None:
+    """Оптимизированная запись сводки - минимум операций"""
     ws = _get_or_add_worksheet(spreadsheet, SHEET_SUMMARY, rows=20, cols=7)
 
     summary_headers = [
@@ -238,50 +329,103 @@ def _write_summary_sheet(
             sum(1 for r in subset if r.is_paid is True),
         ])
 
+    # Очищаем и записываем данными
     ws.clear()
     ws.update("A1", rows, value_input_option="USER_ENTERED")
-    ws.format("A1:G1", HEADER_FORMAT)
 
+    # Форматирование одной операцией
+    format_requests = []
+
+    # Заголовки
+    format_requests.append({
+        "repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1,
+                     "startColumnIndex": 0, "endColumnIndex": 7},
+            "cell": {"userEnteredFormat": HEADER_FORMAT},
+            "fields": "userEnteredFormat"
+        }
+    })
+
+    # Цветные строки
     for i, direction in enumerate(directions, start=2):
         color = DIRECTION_COLORS.get(direction, DIRECTION_COLORS[None])
-        ws.format(f"A{i}:G{i}", {"backgroundColor": color, "textFormat": {"fontSize": 10}})
+        format_requests.append({
+            "repeatCell": {
+                "range": {"sheetId": ws.id, "startRowIndex": i-1, "endRowIndex": i,
+                         "startColumnIndex": 0, "endColumnIndex": 7},
+                "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                "fields": "userEnteredFormat.backgroundColor"
+            }
+        })
+
+    if format_requests:
+        try:
+            ws.batch_update({"requests": format_requests})
+        except:
+            # Fallback
+            for i, direction in enumerate(directions, start=2):
+                color = DIRECTION_COLORS.get(direction, DIRECTION_COLORS[None])
+                ws.format(f"A{i}:G{i}", {"backgroundColor": color})
 
     _set_column_widths(ws, [112] * 7)
 
 
 def export_to_google_sheets(results: List[VacancyResult]) -> str:
     """
-    Добавляет новые строки на лист Alpha и обновляет лист Сводка.
-    Возвращает URL таблицы.
+    Оптимизированная версия экспорта:
+    - Минимум запросов к API
+    - Batch-операции вместо последовательных
+    - Защита от rate limits
     """
     if not results:
         raise ValueError("Нет данных для экспорта в Google Sheets")
 
+    start_time = time.time()
+    print(f"📤 Экспорт {len(results)} вакансий в Google Sheets...")
+
+    # Получаем таблицу
     spreadsheet = _get_spreadsheet()
+
+    # Alpha лист
     alpha = _get_or_add_worksheet(spreadsheet, SHEET_ALPHA)
     _ensure_alpha_layout(alpha)
 
+    # Находим следующую свободную строку
     start_row = _find_next_row(alpha)
     if start_row <= 2:
         start_row = 3
 
+    # Подготовка данных
     data_rows = [_result_to_row(r) for r in results]
-    alpha.append_rows(data_rows, value_input_option="USER_ENTERED")
-    _format_data_rows(alpha, results, start_row)
 
+    # Запись данных одной операцией append
+    alpha.append_rows(data_rows, value_input_option="USER_ENTERED")
+
+    # КРИТИЧЕСКАЯ ОПТИМИЗАЦИЯ: batch-форматирование всех строк
+    _batch_format_rows(alpha, results, start_row)
+
+    # Итоговая строка
     summary_row = start_row + len(results)
     alpha.update(
         f"A{summary_row}",
-        [[f"Итого найдено: {len(results)}"]],
+        [[f"📊 Итого найдено: {len(results)}"]],
         value_input_option="USER_ENTERED",
     )
-    alpha.format(
-        f"A{summary_row}",
-        {"textFormat": {"bold": True, "fontSize": 11}},
-    )
 
+    # Форматирование итоговой строки
+    try:
+        alpha.format(
+            f"A{summary_row}",
+            {"textFormat": {"bold": True, "fontSize": 11}}
+        )
+    except:
+        pass
+
+    # Обновляем сводку
     _write_summary_sheet(spreadsheet, results)
 
+    elapsed = time.time() - start_time
     url = spreadsheet.url
-    print(f"✅ Google Sheets обновлена: {url}")
+    print(f"✅ Google Sheets обновлена за {elapsed:.2f} сек: {url}")
+
     return url
