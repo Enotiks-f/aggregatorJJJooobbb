@@ -172,65 +172,28 @@ def _find_next_row(worksheet: gspread.Worksheet) -> int:
 
 
 def _ensure_alpha_layout(worksheet: gspread.Worksheet) -> None:
-    """Оптимизированная настройка листа Alpha - минимум запросов"""
+    """Настройка листа Alpha — безопасная версия без batch_update ошибок"""
     try:
         # Проверяем, есть ли уже заголовки
         existing = worksheet.get_all_values()
         if existing and len(existing) >= 2 and existing[1] == HEADERS:
             return
 
-        # Все операции в одном batch_update
+        # Очищаем лист
+        worksheet.clear()
+
+        # Заголовок и шапка
         title = f"🔍 Поиск вакансий — {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-
-        # Подготавливаем batch запросы
-        requests = []
-
-        # Очистка листа
-        requests.append({
-            "updateCells": {
-                "range": {"sheetId": worksheet.id},
-                "fields": "*"
-            }
-        })
-
-        # Добавляем данные
-        body = {
-            "requests": requests,
-            "includeSpreadsheetInResponse": False
-        }
-
-        # Выполняем одной операцией
-        worksheet.batch_update(body)
-
-        # Отдельные операции для данных (их немного)
         worksheet.update("A1", [[title]], value_input_option="USER_ENTERED")
         worksheet.update("A2", [HEADERS], value_input_option="USER_ENTERED")
         worksheet.merge_cells("A1:K1")
         worksheet.freeze(rows=2)
 
-        # Форматирование одной операцией
-        format_requests = []
+        # Форматирование заголовков
+        worksheet.format("A1:K1", TITLE_FORMAT)
+        worksheet.format("A2:K2", HEADER_FORMAT)
 
-        # Формат заголовков
-        format_requests.append({
-            "repeatCell": {
-                "range": {"sheetId": worksheet.id, "startRowIndex": 0, "endRowIndex": 1},
-                "cell": {"userEnteredFormat": TITLE_FORMAT},
-                "fields": "userEnteredFormat"
-            }
-        })
-
-        format_requests.append({
-            "repeatCell": {
-                "range": {"sheetId": worksheet.id, "startRowIndex": 1, "endRowIndex": 2},
-                "cell": {"userEnteredFormat": HEADER_FORMAT},
-                "fields": "userEnteredFormat"
-            }
-        })
-
-        if format_requests:
-            worksheet.batch_update({"requests": format_requests})
-
+        # Ширина колонок
         _set_column_widths(worksheet, COLUMN_WIDTHS_PX)
 
     except Exception as e:

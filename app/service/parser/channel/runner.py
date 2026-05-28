@@ -82,11 +82,12 @@ async def search_channel(
             if msg.date and msg.date < cutoff:
                 break
 
-            if repo.exists(build_post_url(channel, msg.id)):
+            post_url = build_post_url(channel, msg.id)
+            if repo.exists(post_url):
                 continue
 
             result = classify(msg.text, channel, msg.id)
-            if result:
+            if result and not repo.exists_by_text(msg.text):
                 results.append(result)
 
         log.info("  → Найдено %s релевантных из @%s", len(results), channel)
